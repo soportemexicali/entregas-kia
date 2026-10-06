@@ -18,9 +18,13 @@ import {
   Mail,
   LogOut,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  Sparkles,
+  Settings
 } from 'lucide-react'
 import { supabase } from './supabase'
+import LimpiezaAutos from './LimpiezaAutos' // <--- Componente del panel de limpieza
+import AdminPanel from './AdminPanel' // <--- Panel de administración
 
 // ---------------------------------------------------------------------------
 // Datos fijos del formulario
@@ -53,6 +57,16 @@ const initialChecklist = () =>
     acc[label] = { checked: false, comment: '', open: false }
     return acc
   }, {})
+
+// ---------------------------------------------------------------------------
+// Permisos por rol: pestañas a las que puede entrar cada uno (la primera es la inicial)
+// ---------------------------------------------------------------------------
+const ROLE_TABS = {
+  admin: ['form', 'history', 'limpieza', 'admin'],
+  gerente: ['form', 'history', 'limpieza'],
+  asesor: ['form', 'history'],
+  detallador: ['limpieza'],
+}
 
 // ---------------------------------------------------------------------------
 // Función auxiliar para comprimir imágenes antes de subir
@@ -227,7 +241,11 @@ export default function App() {
   const [loginLoading, setLoginLoading] = useState(false)
 
   // Estados de la Aplicación
-  const [activeTab, setActiveTab] = useState('form')
+  const [activeTab, setActiveTab] = useState('form') // 'form' | 'history' | 'limpieza' | 'admin'
+  const [userRole, setUserRole] = useState('asesor')
+  const [loadingRole, setLoadingRole] = useState(true)
+  const allowedTabs = ROLE_TABS[userRole] || ROLE_TABS.asesor
+  const canAccess = (tab) => allowedTabs.includes(tab)
   const [now, setNow] = useState(new Date())
   
   const responsibleRef = useRef(null)
@@ -263,6 +281,37 @@ export default function App() {
     const t = setInterval(() => setNow(new Date()), 1000)
     return () => clearInterval(t)
   }, [])
+
+  // Cargar el rol del usuario (admin / gerente / asesor / detallador)
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setUserRole('asesor')
+      setLoadingRole(true)
+      return
+    }
+    let cancelled = false
+    setLoadingRole(true)
+    supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', session.user.id)
+      .single()
+      .then(({ data }) => {
+        if (cancelled) return
+        const rol = ROLE_TABS[data?.role] ? data.role : 'asesor'
+        setUserRole(rol)
+        setActiveTab(ROLE_TABS[rol][0])
+        setLoadingRole(false)
+      })
+    return () => { cancelled = true }
+  }, [session?.user?.id])
+
+  // Si la pestaña activa no está permitida para el rol, mover a la primera permitida
+  useEffect(() => {
+    if (session && !loadingRole && !canAccess(activeTab)) {
+      setActiveTab(allowedTabs[0])
+    }
+  }, [session, loadingRole, activeTab, userRole])
 
   useEffect(() => {
     if (session && activeTab === 'history') {
@@ -556,7 +605,7 @@ export default function App() {
     }
   }
 
-  if (loadingAuth) {
+  if (loadingAuth || (session && loadingRole)) {
     return (
       <div className="min-h-screen bg-[#F4F5F7] flex items-center justify-center font-body text-slate-500">
         Cargando sistema...
@@ -638,14 +687,18 @@ export default function App() {
             </div>
             <div className="min-w-0">
               <h1 className="font-display font-bold text-[19px] leading-tight">
-                {activeTab === 'form' ? 'Puntos a Revisar' : 'Historial de Entregas'}
+                {activeTab === 'form' && 'Puntos a Revisar'}
+                {activeTab === 'history' && 'Historial de Entregas'}
+                {activeTab === 'limpieza' && 'Limpieza de Autos'}
+                {activeTab === 'admin' && 'Panel de Administración'}
               </h1>
-              <p className="text-[13px] text-slate-300 -mt-0.5">Auto Entrega</p>
+              <p className="text-[13px] text-slate-300 -mt-0.5">Auto Entrega & Control</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex bg-slate-900/60 p-1 rounded-xl border border-slate-700/60">
+            <div className="flex bg-slate-900/60 p-1 rounded-xl border border-slate-700/60 overflow-x-auto">
+              {canAccess('form') && (
               <button
                 onClick={() => { setActiveTab('form'); setSelectedInspection(null); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
@@ -654,6 +707,8 @@ export default function App() {
               >
                 Nueva
               </button>
+              )}
+              {canAccess('history') && (
               <button
                 onClick={() => setActiveTab('history')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 ${
@@ -663,6 +718,31 @@ export default function App() {
                 <History size={13} />
                 Historial
               </button>
+              )}
+              {/* Botón nuevo: Limpieza de Autos */}
+              {canAccess('limpieza') && (
+              <button
+                onClick={() => { setActiveTab('limpieza'); setSelectedInspection(null); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 ${
+                  activeTab === 'limpieza' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Sparkles size={13} />
+                Limpieza
+              </button>
+              )}
+              {/* Botón Admin: solo visible para usuarios con rol 'admin' */}
+              {canAccess('admin') && (
+                <button
+                  onClick={() => { setActiveTab('admin'); setSelectedInspection(null); }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 ${
+                    activeTab === 'admin' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Settings size={13} />
+                  Admin
+                </button>
+              )}
             </div>
 
             <button
@@ -687,7 +767,7 @@ export default function App() {
         </div>
       </header>
 
-      {activeTab === 'form' && (
+      {activeTab === 'form' && canAccess('form') && (
         <main className="px-5 mt-5 space-y-5">
           <div className="space-y-4">
             <section>
@@ -781,7 +861,7 @@ export default function App() {
         </main>
       )}
 
-      {activeTab === 'history' && (
+      {activeTab === 'history' && canAccess('history') && (
         <main className="px-5 mt-5 space-y-4">
           {selectedInspection ? (
             <div className="space-y-4">
@@ -918,7 +998,22 @@ export default function App() {
         </main>
       )}
 
-      {activeTab === 'form' && (
+      {/* Vista de Limpieza de Autos */}
+      {activeTab === 'limpieza' && canAccess('limpieza') && (
+        <main className="mt-2">
+          <LimpiezaAutos />
+        </main>
+      )}
+
+      {/* Vista de Administración (solo admin) */}
+      {activeTab === 'admin' && canAccess('admin') && (
+        <main className="mt-2">
+          <AdminPanel />
+        </main>
+      )}
+
+      {/* Botón de guardar: solo visible en la pestaña "Nueva" */}
+      {activeTab === 'form' && canAccess('form') && (
         <div className="fixed bottom-0 left-0 right-0 px-5 pb-5 pt-3 bg-gradient-to-t from-[#F4F5F7] via-[#F4F5F7]/95 to-transparent space-y-2 z-50">
           {status === 'error' && (
             <div className="flex items-center justify-center gap-1.5 text-rose-600 text-[13px] font-medium bg-rose-50 border border-rose-200 py-2.5 px-3 rounded-xl shadow-md">
